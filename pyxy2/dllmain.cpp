@@ -129,12 +129,16 @@ extern "C" {
 
     //解析WAS帧图片
     EXPORT unsigned char* read_frame(unsigned char* lp, unsigned char* Palette32) {
-        unsigned char* tmp = pyxy2.read_frame(lp, (PyXY2::_PIXEL*)Palette32);
+        unsigned char* tmp = pyxy2.read_frame(lp, (uint32_t*)Palette32);
         return tmp;
     }
 
     EXPORT void delete_me(char* ptr) {
         delete ptr;
+    }
+
+    EXPORT void delete_array(char* ptr) {
+        delete []ptr;
     }
 
     EXPORT PyObject* get_hash_py(char* s) {

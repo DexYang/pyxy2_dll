@@ -246,7 +246,6 @@ unsigned long PyXY2::StringId(const char* str) {
 
 PyObject* PyXY2::GetHashPy(char* p) {
 	unsigned long hash = StringId(StringAdjust(p));
-	std::cout << hash << std::endl;
 	PyObject* Hash = Py_BuildValue("I", hash);
 	return Hash;
 }
@@ -261,174 +260,92 @@ unsigned char* PyXY2::read_color_pal(unsigned char* lp) {
 	return (unsigned char* )Palette32;
 }
 
-unsigned char* PyXY2::read_frame(unsigned char* lp, _PIXEL* pal) {
-	unsigned int* int_lp = (unsigned int*)lp;
-	FRAME frame;
-	frame.Key_X = *int_lp++;
-	frame.Key_Y = *int_lp++;
-	frame.Width = *int_lp++;
-	frame.Height = *int_lp++;
+unsigned char* PyXY2::read_frame(uint8_t* lp, uint32_t* pal) {
+	uint8_t* data = (uint8_t*)lp;
+	FRAME* frame = (FRAME*)data;
 
-	unsigned int* FrameLineIndex = new unsigned int[frame.Height]; // 分配行 引索列表的空间
-	for (unsigned int k = 0; k < frame.Height; k++) {
-		FrameLineIndex[k] = *int_lp++;  // 图片 行 索引
-	}
+	data += sizeof(FRAME);
+	uint32_t* line = (uint32_t*)data; //压缩像素行
 
-	unsigned int pixels = frame.Width * frame.Height; // 计算总像素值
-	_PIXEL* BmpBuffer = new _PIXEL[pixels];
-	unsigned char* BP = (unsigned char*)BmpBuffer;
-	memset(BmpBuffer, 0, pixels * 4);
+	uint32_t linelen, linepos, color, h;
+	uint8_t style, alpha, repeat;
 
-	for (uint32_t h = 0; h < frame.Height; h++) {
-		uint32_t linePixels = 0;
-		bool lineNotOver = true;
-		uint8_t* pData = (uint8_t*)lp + FrameLineIndex[h];
-		while (*pData != 0 && lineNotOver) {
+	uint32_t PixelCount = frame->Width * frame->Height; // 计算总像素值
+	uint32_t* wdata = new uint32_t[PixelCount];
+	uint32_t* wdata2 = wdata;
+	uint8_t* BP = (uint8_t*)wdata;
+	memset(wdata, 0, PixelCount * 4);
 
-			uint8_t level = 0;  // Alpha
-			uint8_t repeat = 0; // 重复次数
-			_PIXEL color;	//重复颜色
-			color.R = 0;
-			color.G = 0;
-			color.B = 0;
-			color.A = 0;
-			uint8_t style = (*pData & 0xc0) >> 6;   // 取字节的前两个比特
-			switch (style) {
-			case 0:   // {00******}
-				if (*pData & 0x20) {  // {001*****} 表示带有Alpha通道的单个像素
-					// {001 +5bit Alpha}+{1Byte Index}, 表示带有Alpha通道的单个像素。
-					// {001 +0~31层Alpha通道}+{1~255个调色板引索}
-					level = (*pData) & 0x1f;  // 0x1f=(11111) 获得Alpha通道的值
-					if (*(pData - 1) == 0xc0) {  //特殊处理
-						//Level = 31;
-						//Pixels--;
-						//pos--;
-						if (linePixels <= frame.Width) {
-							*BmpBuffer = *(BmpBuffer - 1);
-							BmpBuffer++;
-							linePixels++;
-							pData += 2;
-							break;
-						}
-						else {
-							lineNotOver = false;
-						}
-					}
-					pData++;  // 下一个字节
-					if (linePixels <= frame.Width) {
-						*BmpBuffer = SetAlpha(pal[*pData], (level << 3) | 7 - 1);
-						BmpBuffer++;
-						linePixels++;
-						pData++;
-					}
-					else {
-						lineNotOver = false;
-					}
-				}
-				else {   // {000*****} 表示重复n次带有Alpha通道的像素
-				 // {000 +5bit Times}+{1Byte Alpha}+{1Byte Index}, 表示重复n次带有Alpha通道的像素。
-				 // {000 +重复1~31次}+{0~255层Alpha通道}+{1~255个调色板引索}
-				 // 注: 这里的{00000000} 保留给像素行结束使用，所以只可以重复1~31次。
-					repeat = (*pData) & 0x1f; // 获得重复的次数
-					pData++;
-					level = *pData; // 获得Alpha通道值
-					pData++;
-					color = SetAlpha(pal[*pData], (level << 3) | 7 - 1);
-					for (int i = 1; i <= repeat; i++) {
-						if (linePixels <= frame.Width) {
-							*BmpBuffer = color;
-							BmpBuffer++;
-							linePixels++;
-						}
-						else {
-							lineNotOver = false;
-						}
-					}
-					pData++;
-				}
-				break;
-			case 1: // {01******} 表示不带Alpha通道不重复的n个像素组成的数据段
-			// {01  +6bit Times}+{nByte Datas},表示不带Alpha通道不重复的n个像素组成的数据段。
-			// {01  +1~63个长度}+{n个字节的数据},{01000000}保留。
-				repeat = (*pData) & 0x3f; // 获得数据组中的长度
-				pData++;
-				for (int i = 1; i <= repeat; i++) {
-					if (linePixels <= frame.Width) {
-						*BmpBuffer = pal[*pData];
-						BmpBuffer++;
-						linePixels++;
-						pData++;
-					}
-					else {
-						lineNotOver = false;
-					}
-				}
-				break;
-			case 2: // {10******} 表示重复n次像素
-				// {10  +6bit Times}+{1Byte Index}, 表示重复n次像素。
-				// {10  +重复1~63次}+{0~255个调色板引索},{10000000}保留。
-				repeat = (*pData) & 0x3f; // 获得重复的次数
-				pData++;
-				color = pal[*pData];
-				for (int i = 1; i <= repeat; i++) {
-					if (linePixels <= frame.Width) {
-						*BmpBuffer = color;
-						BmpBuffer++;
-						linePixels++;
-					}
-					else {
-						lineNotOver = false;
-					}
-				}
-				pData++;
-				break;
-			case 3: // {11******} 表示跳过n个像素，跳过的像素用透明色代替
-				// {11  +6bit Times}, 表示跳过n个像素，跳过的像素用透明色代替。
-				// {11  +跳过1~63个像素},{11000000}保留。
-				repeat = (*pData) & 0x3f; // 获得重复次数
-				if (repeat == 0) {
-					if (linePixels <= frame.Width) { //特殊处理
-						BmpBuffer--;
-						linePixels--;
-					}
-					else {
-						lineNotOver = false;
-					}
-				}
-				else {
-					for (int i = 1; i <= repeat; i++) {
-						if (linePixels <= frame.Width) {
-							BmpBuffer++;
-							linePixels++;
-						}
-						else {
-							lineNotOver = false;
-						}
-					}
-				}
-				pData++;
-				break;
-			default: // 一般不存在这种情况
-				printf("WAS ERROR\n");
-				break;
+	linelen = frame->Width; //行总长度
+	linepos = 0;           //记录行长度
+	style = 0;
+	alpha = 0;  // Alpha
+	repeat = 0; // 重复次数
+	color = 0;  //重复颜色
+
+	uint8_t* rdata;
+
+	for (h = 0; h < frame->Height; h++) {
+		wdata = wdata2 + linepos;
+		linepos += linelen;
+		rdata = lp + line[h];
+		if (!*rdata) {  //法术隔行处理
+			if (h > 0 && *(lp + line[h - 1])) {
+				memcpy(wdata, wdata - linelen, linelen * 4);
 			}
-		}
-		if (*pData == 0 || !lineNotOver)
-		{
-			uint32_t repeat = frame.Width - linePixels;
-			if (h > 0 && !linePixels) {//法术处理
-				uint8_t* last = (uint8_t*)lp + FrameLineIndex[h - 1];
-				if (*last != 0) {
-					memcpy(BmpBuffer, BmpBuffer - frame.Width, frame.Width * 4);
-					BmpBuffer += frame.Width;
+		} else {
+			while (*rdata) {  // {00000000} 表示像素行结束，如有剩余像素用透明色代替
+				style = (*rdata & 0xC0) >> 6; // 取字节的前两个比特
+				switch (style) {
+				case 0:   // {00******} 
+					if (*rdata & 0x20) {  // {001*****} 表示带有Alpha通道的单个像素
+						alpha = ((*rdata++) & 0x1F) << 3; // 0x1f=(11111) 获得Alpha通道的值
+						//alpha = (alpha<<3)|(alpha>>2);
+						*wdata++ = (pal[*rdata++] & 0xFFFFFF) | (alpha << 24); //合成透明
+					} else {  // {000*****} 表示重复n次带有Alpha通道的像素
+						repeat = (*rdata++) & 0x1F; // 获得重复的次数
+						alpha = (*rdata++) << 3;    // 获得Alpha通道值
+						//alpha = (alpha<<3)|(alpha>>2);
+						color = (pal[*rdata++] & 0xFFFFFF) | (alpha << 24); //合成透明
+						while (repeat)
+						{
+							*wdata++ = color; //循环固定颜色
+							repeat--;
+						}
+					}
+					break;
+				case 1:  // {01******} 表示不带Alpha通道不重复的n个像素组成的数据段
+					repeat = (*rdata++) & 0x3F; // 获得数据组中的长度
+					while (repeat) {
+						*wdata++ = pal[*rdata++]; //循环指定颜色
+						repeat--;
+					}
+					break;
+				case 2:  // {10******} 表示重复n次像素
+					repeat = (*rdata++) & 0x3F; // 获得重复的次数
+					color = pal[*rdata++];
+					while (repeat) {
+						*wdata++ = color;
+						repeat--;
+					}
+					break;
+				case 3:  // {11******} 表示跳过n个像素，跳过的像素用透明色代替
+					repeat = (*rdata++) & 0x3f; // 获得重复次数
+					if (!repeat) { //非常规处理
+						//printf("%d,%d,%X,%X\n",*rdata,rdata[1],rdata[2],rdata[3]);//ud->FrameList[id]+line[h]
+						if ((wdata[-1] & 0xFFFFFF) == 0 && h > 0) //黑点
+							wdata[-1] = wdata[-(int)linelen];
+						else
+							wdata[-1] = wdata[-1] | 0xFF000000; //边缘
+						rdata += 2;
+						break;
+					}
+					wdata += repeat; //跳过
+					break;
 				}
-			}
-			else if (repeat > 0) {
-				BmpBuffer += repeat;
 			}
 		}
 	}
-	delete FrameLineIndex;
 	return BP;
 }
 

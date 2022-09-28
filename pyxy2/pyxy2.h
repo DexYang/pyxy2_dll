@@ -154,7 +154,7 @@ public:
 
 	unsigned char* read_color_pal(unsigned char* lp);
 
-	unsigned char* read_frame(unsigned char* lp, _PIXEL* Palette32);
+	unsigned char* read_frame(uint8_t* lp, uint32_t* Palette32);
 
 	_PIXEL RGB565to888(unsigned short color, unsigned char Alpha);
 
